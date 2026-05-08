@@ -1,0 +1,15 @@
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\bin\Debug\net10.0\VertexCompany.exe
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\bin\Debug\net10.0\VertexCompany.deps.json
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\bin\Debug\net10.0\VertexCompany.runtimeconfig.json
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\bin\Debug\net10.0\VertexCompany.dll
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\bin\Debug\net10.0\VertexCompany.pdb
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\VertexCompany.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\VertexCompany.AssemblyInfoInputs.cache
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\VertexCompany.AssemblyInfo.cs
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\VertexCompany.csproj.CoreCompileInputs.cache
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\VertexCompany.sourcelink.json
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\VertexCompany.dll
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\refint\VertexCompany.dll
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\VertexCompany.pdb
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\VertexCompany.genruntimeconfig.cache
+C:\Users\Dan-Dell\Documents\My-Projects\PIM-III-VertexCompany\VertexCompany\obj\Debug\net10.0\ref\VertexCompany.dll
