@@ -3,17 +3,11 @@ using Microsoft.Extensions.Configuration;
 using System;
 Database.Inicializar();
 
-// Simulação de dados (Posteriormente virão do Banco de Dados)
-decimal retornoMedio = 12.5m;
-
 bool executando = true;
 
 while (executando)
 {
-
-    var metricas = GerenteManager.ObterMetricasGlobais();
-    decimal capitalTotalAlocado = metricas.total;
-    int equipesAtivas = metricas.quantidade;
+    var (capitalTotalAlocado, equipesAtivas, retornoMedio) = GerenteManager.ObterMetricasGlobais();
 
     Console.WriteLine("\n===========================================================");
     Console.WriteLine("                VERTEX COMPANY - SISTEMA FINANCEIRO         ");
@@ -30,7 +24,14 @@ while (executando)
     Console.WriteLine("\n-----------------------------------------------------------");
     Console.WriteLine("VISÃO CONSOLIDADA (REAL-TIME)");
     Console.WriteLine($"Capital Total Alocado: {capitalTotalAlocado:C}");
-    Console.WriteLine($"Retorno Médio das Equipes: {retornoMedio}%");
+
+    // Aplicando cor para a média de retorno
+    if (retornoMedio > 0) Console.ForegroundColor = ConsoleColor.Green;
+    else if (retornoMedio < 0) Console.ForegroundColor = ConsoleColor.Red;
+
+    Console.WriteLine($"Retorno Médio Global:  {retornoMedio:F2}%");
+    Console.ResetColor();
+    
     Console.WriteLine($"Equipes em Operação: {equipesAtivas}");
     Console.WriteLine("-----------------------------------------------------------");
 

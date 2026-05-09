@@ -54,31 +54,35 @@ public class GerenteManager
         }
     }
 
-    public static (decimal total, int quantidade) ObterMetricasGlobais()
+    public static (decimal total, int quantidade, decimal media) ObterMetricasGlobais()
     {
         using var conn = new MySqlConnection(GetConnectionString());
         try
         {
             conn.Open();
-            // SQL que soma o capital e conta as equipes em uma única consulta
-            string sql = "SELECT SUM(capital_alocado), COUNT(*) FROM equipes";
+            string sql = @"
+                SELECT 
+                    (SELECT SUM(capital_alocado) FROM equipes), 
+                    (SELECT COUNT(*) FROM equipes),
+                    (SELECT IFNULL(SUM(lucro_prejuizo), 0) / IFNULL(SUM(valor_aplicado), 1) * 100 FROM operacoes)";
             
             using var cmd = new MySqlCommand(sql, conn);
             using var reader = cmd.ExecuteReader();
 
             if (reader.Read())
             {
-                // Tratamos o null caso o banco esteja vazio
                 decimal total = reader.IsDBNull(0) ? 0 : reader.GetDecimal(0);
                 int quantidade = reader.GetInt32(1);
-                return (total, quantidade);
+                decimal media = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
+                
+                return (total, quantidade, media);
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Erro ao carregar visão consolidada: {ex.Message}");
+            Console.WriteLine($"Erro ao carregar métricas: {ex.Message}");
         }
-        return (0, 0);
+        return (0, 0, 0);
     }
 
 
@@ -133,7 +137,7 @@ public class GerenteManager
                     IFNULL(SUM(o.lucro_prejuizo), 0) as pnl_total
                 FROM equipes e
                 LEFT JOIN operacoes o ON e.id = o.equipe_id
-                GROUP BY e.id
+                GROUP BY e.id, e.nome_equipe, e.responsavel, e.capital_alocado, e.capital_utilizado
                 ORDER BY pnl_total DESC"; // Ranking: Quem lucra mais aparece primeiro
 
             using var cmd = new MySqlCommand(sql, conn);
