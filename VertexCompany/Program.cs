@@ -1,14 +1,20 @@
-﻿using System;
+﻿using MySql.Data.MySqlClient;
+using Microsoft.Extensions.Configuration;
+using System;
+Database.Inicializar();
 
 // Simulação de dados (Posteriormente virão do Banco de Dados)
-decimal capitalTotalAlocado = 2500000.00m;
 decimal retornoMedio = 12.5m;
-int equipesAtivas = 4;
 
 bool executando = true;
 
 while (executando)
 {
+
+    var metricas = GerenteManager.ObterMetricasGlobais();
+    decimal capitalTotalAlocado = metricas.total;
+    int equipesAtivas = metricas.quantidade;
+
     Console.WriteLine("\n===========================================================");
     Console.WriteLine("                VERTEX COMPANY - SISTEMA FINANCEIRO         ");
     Console.WriteLine("                                                           ");
@@ -74,13 +80,8 @@ void ExibirVisao()
 
 void ListarEquipesAtivas()
 {
-    Console.WriteLine("\n=== EQUIPES EM OPERAÇÃO ===");
-    Console.WriteLine("---------------------------------------------------");
-    Console.WriteLine("- Equipe Alpha  | Responsável: Ana Lima");
-    Console.WriteLine("- Equipe Beta   | Responsável: Carlos Melo");
-    Console.WriteLine("- Equipe Delta  | Responsável: Fernanda Cruz");
-    Console.WriteLine("- Equipe Omega  | Responsável: Pedro Nunes");
-    Console.WriteLine("---------------------------------------------------");
+    GerenteManager.ListarEquipesBanco();
+    
     Console.WriteLine("\nPressione qualquer tecla para voltar...");
     Console.ReadKey();
 }
@@ -94,60 +95,122 @@ void MenuLogin()
     Console.Write("\nEscolha o nível de acesso: ");
     
     string nivel = Console.ReadLine()!;
-
     if (nivel == "0") return;
 
-    Console.Write("Identificação (Nome/ID): ");
+    Console.Write("Identificação (Nome da Equipe): ");
     string usuario = Console.ReadLine()!;
-    Console.Write("Senha: ");
+    Console.Write("Senha de Acesso: ");
     string senha = Console.ReadLine()!;
 
-    if (nivel == "1")
+    using var conn = new MySqlConnection(Database.GetConnectionString());
+    try
     {
-        // Aqui chamaremos a validação do Gerente no DB futuramente
-        if (usuario == "admin" && senha == "vertex2026") 
+        conn.Open();
+        string sql = "";
+
+        // Se for Gerente (Nível 1), verifica a senha_admin
+        if (nivel == "1")
         {
-            PainelGerente();
+            sql = "SELECT nome_equipe FROM equipes WHERE nome_equipe = @nome AND senha_admin = @senha";
         }
-        else 
+        // Se for Equipe (Nível 2), verifica a senha_equipe
+        else if (nivel == "2")
         {
-            Console.WriteLine("\n[ERRO] Credenciais de Gerência inválidas.");
+            sql = "SELECT nome_equipe FROM equipes WHERE nome_equipe = @nome AND senha_equipe = @senha";
+        }
+
+        using var cmd = new MySqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@nome", usuario);
+        cmd.Parameters.AddWithValue("@senha", senha);
+
+        var resultado = cmd.ExecuteScalar();
+
+        if (resultado != null)
+        {
+            string nomeConfirmado = resultado.ToString()!;
+            
+            if (nivel == "1") 
+            {
+                Console.WriteLine($"\n[OK] Acesso Administrativo concedido para {nomeConfirmado}.");
+                PainelGerente(); 
+            }
+            else 
+            {
+                Console.WriteLine($"\n[OK] Acesso Operacional concedido para Equipe {nomeConfirmado}.");
+                PainelEquipe(nomeConfirmado);
+            }
+        }
+        else
+        {
+            Console.WriteLine("\n[ERRO] Credenciais inválidas para o nível selecionado.");
         }
     }
-    else if (nivel == "2")
+    catch (Exception ex)
     {
-        // Aqui chamaremos a validação da Equipe no DB futuramente
-        // Simulando login da Equipe Alpha
-        if (usuario == "Alpha" && senha == "123") 
-        {
-            PainelEquipe("Alpha");
-        }
-        else 
-        {
-            Console.WriteLine("\n[ERRO] Nome de equipe ou senha incorretos.");
-        }
+        Console.WriteLine($"\n[ERRO] Falha na conexão: {ex.Message}");
     }
-    
+
     Console.WriteLine("\nPressione qualquer tecla para continuar...");
     Console.ReadKey();
 }
 
 void PainelGerente()
 {
-    Console.WriteLine("\n--- PAINEL ESTRATÉGICO (GERENTE) ---");
-    Console.WriteLine("> Métricas Consolidadas");
-    Console.WriteLine("> Gestão de Capital Alocado");
-    Console.WriteLine("> Performance por Equipe (P&L)");
-    Console.WriteLine("> Adicionar/Remover Equipes");
-    Console.WriteLine("\n[Em desenvolvimento: Integração com SQL]");
+    bool noPainel = true;
+    while (noPainel)
+    {
+        Console.WriteLine("\n--- PAINEL ESTRATÉGICO (GERENTE) ---");
+        Console.WriteLine("1. Cadastrar Nova Equipe");
+        Console.WriteLine("2. Listar Métricas Globais (P&L Consolidado)");
+        Console.WriteLine("0. Sair do Painel");
+        Console.Write("\nOpção: ");
+        
+        string op = Console.ReadLine()!;
+
+        if (op == "1")
+        {
+            GerenteManager.CadastrarEquipe();
+        }
+        else if (op == "2")
+        {
+            GerenteManager.ExibirRelatorioGeral();
+            Console.WriteLine("\nPressione qualquer tecla para voltar...");
+            Console.ReadKey();
+        }
+        else if (op == "0")
+        {
+            noPainel = false;
+        }
+    }
 }
 
 void PainelEquipe(string nomeEquipe)
 {
-    Console.WriteLine($"\n--- PAINEL OPERACIONAL (EQUIPE {nomeEquipe.ToUpper()}) ---");
-    Console.WriteLine("> Resumo Financeiro da Equipe");
-    Console.WriteLine("> Operações Ativas (Tesouro, Ações, etc)");
-    Console.WriteLine("> Listar Membros da Equipe");
-    Console.WriteLine("> Registrar Nova Operação");
-    Console.WriteLine("\n[Em desenvolvimento: Filtro por Equipe_ID]");
+    bool noPainel = true;
+    while (noPainel)
+    {
+        Console.WriteLine($"\n--- PAINEL OPERACIONAL (EQUIPE {nomeEquipe.ToUpper()}) ---");
+        Console.WriteLine("1. Registrar Nova Operação");
+        Console.WriteLine("2. Ver Resumo Financeiro");
+        Console.WriteLine("3. Listar Membros da Equipe");
+        Console.WriteLine("4. Adicionar Novo Membro");
+        Console.WriteLine("0. Sair");
+        Console.Write("\nOpção: ");
+
+        string op = Console.ReadLine()!;
+
+        if (op == "1") EquipeManager.RegistrarOperacao(nomeEquipe);
+        else if (op == "2") {
+            EquipeManager.ExibirResumoFinanceiro(nomeEquipe);
+            Console.WriteLine("\nPressione qualquer tecla para voltar...");
+            Console.ReadKey();
+        }
+        else if (op == "3") {
+            EquipeManager.ListarMembros(nomeEquipe);
+            Console.WriteLine("\nPressione qualquer tecla para voltar...");
+            Console.ReadKey();
+        }
+        else if (op == "4") EquipeManager.AdicionarMembro(nomeEquipe);
+        else if (op == "0") noPainel = false;
+    }
 }
