@@ -1,17 +1,9 @@
 using MySql.Data.MySqlClient;
 using Microsoft.Extensions.Configuration;
+using System;
 
 public class EquipeManager
 {
-    private static string GetConnectionString()
-    {
-        var config = new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json")
-            .Build();
-        return config.GetConnectionString("DefaultConnection")!;
-    }
-
     public static void RegistrarOperacao(string nomeEquipe)
     {
         Console.WriteLine($"\n--- REGISTRAR OPERAÇÃO: EQUIPE {nomeEquipe.ToUpper()} ---");
@@ -31,7 +23,8 @@ public class EquipeManager
         // Cálculo automático da porcentagem de retorno
         decimal porcentagem = valor > 0 ? (lucro / valor) * 100 : 0;
 
-        using var conn = new MySqlConnection(GetConnectionString());
+        // Alterado para a classe Database centralizada
+        using var conn = new MySqlConnection(Database.GetConnectionString());
         try
         {
             conn.Open();
@@ -60,7 +53,7 @@ public class EquipeManager
             cmdOp.ExecuteNonQuery();
 
             // Atualizamos o capital utilizado na tabela de equipes (Soma de todas as operações)
-            string sqlUpdate = @"UPDATE equipes SET capital_utilizado = (SELECT SUM(valor_aplicado) FROM operacoes WHERE equipe_id = @id) 
+            string sqlUpdate = @"UPDATE equipes SET capital_utilizado = (SELECT IFNULL(SUM(valor_aplicado), 0) FROM operacoes WHERE equipe_id = @id) 
                                  WHERE id = @id";
             using var cmdUp = new MySqlCommand(sqlUpdate, conn);
             cmdUp.Parameters.AddWithValue("@id", equipeId);
@@ -74,23 +67,22 @@ public class EquipeManager
         }
     }
 
-
     public static void ExibirResumoFinanceiro(string nomeEquipe)
     {
-        using var conn = new MySqlConnection(GetConnectionString());
+        using var conn = new MySqlConnection(Database.GetConnectionString());
         try
         {
             conn.Open();
             
-            // Consulta para pegar os dados da equipe e o P&L das operações
+            // Consulta protegendo campos nulos com IFNULL
             string sql = @"
-                SELECT e.capital_alocado, e.capital_utilizado, 
-                    SUM(o.lucro_prejuizo) as pnl_total,
+                SELECT e.capital_alocado, IFNULL(e.capital_utilizado, 0), 
+                    IFNULL(SUM(o.lucro_prejuizo), 0) as pnl_total,
                     COUNT(o.id) as total_operacoes
                 FROM equipes e
                 LEFT JOIN operacoes o ON e.id = o.equipe_id
                 WHERE e.nome_equipe = @nome
-                GROUP BY e.id";
+                GROUP BY e.id, e.capital_alocado, e.capital_utilizado";
 
             using var cmd = new MySqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@nome", nomeEquipe);
@@ -100,7 +92,7 @@ public class EquipeManager
             {
                 decimal alocado = reader.GetDecimal(0);
                 decimal utilizado = reader.GetDecimal(1);
-                decimal pnl = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
+                decimal pnl = reader.GetDecimal(2);
                 int totalOps = reader.GetInt32(3);
 
                 decimal saldoDisponivel = alocado - utilizado;
@@ -114,7 +106,6 @@ public class EquipeManager
                 Console.WriteLine($"Uso do Capital:      {porcentagemUso:F2}%");
                 Console.WriteLine("---------------------------------------------------");
                 
-                // Lógica de cor para o P&L (Lucros e Perdas)
                 if (pnl > 0) Console.ForegroundColor = ConsoleColor.Green;
                 else if (pnl < 0) Console.ForegroundColor = ConsoleColor.Red;
 
@@ -141,12 +132,11 @@ public class EquipeManager
         string statusOp = Console.ReadLine()!;
         string status = (statusOp == "2") ? "Férias" : "Ativo";
 
-        using var conn = new MySqlConnection(GetConnectionString());
+        using var conn = new MySqlConnection(Database.GetConnectionString());
         try
         {
             conn.Open();
             
-            // Pegamos o ID da equipe
             string sqlId = "SELECT id FROM equipes WHERE nome_equipe = @nome";
             int equipeId = 0;
             using (var cmdId = new MySqlCommand(sqlId, conn))
@@ -155,7 +145,6 @@ public class EquipeManager
                 equipeId = Convert.ToInt32(cmdId.ExecuteScalar());
             }
 
-            // Inserimos o membro
             string sqlMembro = "INSERT INTO membros (equipe_id, nome, status) VALUES (@id, @nome, @status)";
             using var cmd = new MySqlCommand(sqlMembro, conn);
             cmd.Parameters.AddWithValue("@id", equipeId);
@@ -173,7 +162,7 @@ public class EquipeManager
 
     public static void ListarMembros(string nomeEquipe)
     {
-        using var conn = new MySqlConnection(GetConnectionString());
+        using var conn = new MySqlConnection(Database.GetConnectionString());
         try
         {
             conn.Open();
@@ -200,7 +189,6 @@ public class EquipeManager
                 string nome = reader.GetString(0);
                 string status = reader.GetString(1);
                 
-                // UX: Muda a cor dependendo do status
                 if (status == "Férias") Console.ForegroundColor = ConsoleColor.Yellow;
                 
                 Console.WriteLine($"- {nome.PadRight(20)} | Status: {status}");
@@ -214,10 +202,282 @@ public class EquipeManager
         }
     }
 
+    public static void ListarOperacoesDaEquipe(string nomeEquipe)
+    {
+        using var conn = new MySqlConnection(Database.GetConnectionString());
+        try
+        {
+            conn.Open();
+            // CORRIGIDO: Modificado de 'o.valor_applied' para 'o.valor_aplicado' para evitar crash
+            string sql = @"SELECT o.id, o.ativo, o.tipo, o.valor_aplicado, o.lucro_prejuizo, o.retorno_porcentagem 
+                        FROM operacoes o 
+                        JOIN equipes e ON o.equipe_id = e.id 
+                        WHERE e.nome_equipe = @nome";
+
+            using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@nome", nomeEquipe);
+            using var reader = cmd.ExecuteReader();
+
+            Console.WriteLine($"\n=== OPERAÇÕES REGISTRADAS: {nomeEquipe.ToUpper()} ===");
+            Console.WriteLine("ID  | Ativo                | Tipo        | Valor (R$)   | P&L (R$)    | Retorno");
+            Console.WriteLine("-----------------------------------------------------------------------------");
+            
+            while (reader.Read())
+            {
+                Console.WriteLine($"{reader.GetInt32("id"),-3} | " +
+                                $"{reader.GetString("ativo").PadRight(20)} | " +
+                                $"{reader.GetString("tipo").PadRight(11)} | " +
+                                $"{reader.GetDecimal("valor_aplicado"),-12:C} | " +
+                                $"{reader.GetDecimal("lucro_prejuizo"),-11:C} | " +
+                                $"{reader.GetDecimal("retorno_porcentagem")}%");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n[ERRO] Falha ao listar operações: {ex.Message}");
+        }
+    }
+
+    public static void EditarOperacao(string nomeEquipe)
+    {
+        ListarOperacoesDaEquipe(nomeEquipe);
+
+        Console.Write("\nDigite o ID da operação que deseja editar: ");
+        if (!int.TryParse(Console.ReadLine(), out int opId)) return;
+
+        Console.WriteLine("\n[Deixe em branco para manter o valor atual]");
+        Console.Write("Novo Ativo: ");
+        string novoAtivo = Console.ReadLine()!;
+        
+        Console.Write("Novo Tipo: ");
+        string novoTipo = Console.ReadLine()!;
+
+        Console.Write("Novo Valor Aplicado (R$): ");
+        string vInput = Console.ReadLine()!;
+        decimal? novoValor = null;
+        if (!string.IsNullOrWhiteSpace(vInput) && decimal.TryParse(vInput, out decimal v)) novoValor = v;
+
+        Console.Write("Novo Lucro/Prejuízo Estimado (R$): ");
+        string lInput = Console.ReadLine()!;
+        decimal? novoLucro = null;
+        if (!string.IsNullOrWhiteSpace(lInput) && decimal.TryParse(lInput, out decimal l)) novoLucro = l;
+
+        using var conn = new MySqlConnection(Database.GetConnectionString());
+        try
+        {
+            conn.Open();
+
+            string sqlGetOp = "SELECT valor_aplicado, lucro_prejuizo, equipe_id FROM operacoes WHERE id = @id";
+            decimal valAtual = 0, lucAtual = 0;
+            int equipeId = 0;
+            using (var cmdGet = new MySqlCommand(sqlGetOp, conn))
+            {
+                cmdGet.Parameters.AddWithValue("@id", opId);
+                using var r = cmdGet.ExecuteReader();
+                if (r.Read())
+                {
+                    valAtual = r.GetDecimal("valor_aplicado");
+                    lucAtual = r.GetDecimal("lucro_prejuizo");
+                    equipeId = r.GetInt32("equipe_id");
+                }
+                else
+                {
+                    Console.WriteLine("\n[ERRO] Operação não encontrada.");
+                    return;
+                }
+            }
+
+            decimal valFinal = novoValor ?? valAtual;
+            decimal lucFinal = novoLucro ?? lucAtual;
+            decimal novaPorcentagem = valFinal > 0 ? (lucFinal / valFinal) * 100 : 0;
+
+            string sqlUpdate = @"UPDATE operacoes SET 
+                                ativo = IF(@ativo = '', ativo, @ativo),
+                                tipo = IF(@tipo = '', tipo, @tipo),
+                                valor_aplicado = @valor,
+                                lucro_prejuizo = @lucro,
+                                retorno_porcentagem = @porc
+                                WHERE id = @id";
+
+            using var cmdUp = new MySqlCommand(sqlUpdate, conn);
+            cmdUp.Parameters.AddWithValue("@ativo", novoAtivo);
+            cmdUp.Parameters.AddWithValue("@tipo", novoTipo);
+            cmdUp.Parameters.AddWithValue("@valor", valFinal);
+            cmdUp.Parameters.AddWithValue("@lucro", lucFinal);
+            cmdUp.Parameters.AddWithValue("@porc", novaPorcentagem);
+            cmdUp.Parameters.AddWithValue("@id", opId);
+            cmdUp.ExecuteNonQuery();
+
+            string sqlRecalculo = @"UPDATE equipes SET capital_utilizado = (SELECT IFNULL(SUM(valor_aplicado), 0) FROM operacoes WHERE equipe_id = @eqId) 
+                                    WHERE id = @eqId";
+            using var cmdRecalc = new MySqlCommand(sqlRecalculo, conn);
+            cmdRecalc.Parameters.AddWithValue("@eqId", equipeId);
+            cmdRecalc.ExecuteNonQuery();
+
+            Console.WriteLine("\n[SUCESSO] Operação atualizada e capital da equipe recalculado!");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n[ERRO] Falha ao editar operação: {ex.Message}");
+        }
+    }
+
+    public static void ExcluirOperacao(string nomeEquipe)
+    {
+        ListarOperacoesDaEquipe(nomeEquipe);
+
+        Console.Write("\nDigite o ID da operação que deseja EXCLUIR: ");
+        if (!int.TryParse(Console.ReadLine(), out int opId)) return;
+
+        using var conn = new MySqlConnection(Database.GetConnectionString());
+        try
+        {
+            conn.Open();
+
+            string sqlGetId = "SELECT equipe_id FROM operacoes WHERE id = @id";
+            int equipeId = 0;
+            using (var cmdGet = new MySqlCommand(sqlGetId, conn))
+            {
+                cmdGet.Parameters.AddWithValue("@id", opId);
+                var res = cmdGet.ExecuteScalar();
+                if (res != null) equipeId = Convert.ToInt32(res);
+            }
+
+            if (equipeId == 0)
+            {
+                Console.WriteLine("\n[ERRO] Operação não encontrada.");
+                return;
+            }
+
+            string sqlDel = "DELETE FROM operacoes WHERE id = @id";
+            using var cmdDel = new MySqlCommand(sqlDel, conn);
+            cmdDel.Parameters.AddWithValue("@id", opId);
+            cmdDel.ExecuteNonQuery();
+
+            string sqlRecalculo = @"UPDATE equipes SET capital_utilizado = (SELECT IFNULL(SUM(valor_aplicado), 0) FROM operacoes WHERE equipe_id = @eqId) 
+                                    WHERE id = @eqId";
+            using var cmdRecalc = new MySqlCommand(sqlRecalculo, conn);
+            cmdRecalc.Parameters.AddWithValue("@eqId", equipeId);
+            cmdRecalc.ExecuteNonQuery();
+
+            Console.WriteLine("\n[SUCESSO] Operação removida e saldo do capital atualizado!");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n[ERRO] Falha ao excluir operação: {ex.Message}");
+        }
+    }
 
 
+    public static void EditarMembro(string nomeEquipe)
+    {
+        Console.Clear();
+        Console.WriteLine($"--- EDITAR MEMBRO - EQUIPE {nomeEquipe.ToUpper()} ---");
+        
+        // Primeiro, lista os membros para o usuário ver os IDs disponíveis
+        ListarMembros(nomeEquipe);
 
+        Console.Write("\nDigite o ID do membro que deseja editar (ou 0 para cancelar): ");
+        if (!int.TryParse(Console.ReadLine(), out int idMembro) || idMembro == 0) return;
 
+        Console.Write("Digite o novo Nome do membro: ");
+        string novoNome = Console.ReadLine()!;
+        Console.Write("Digite a nova Função/Cargo (ex: Trader, Analista): ");
+        string novaFuncao = Console.ReadLine()!;
+
+        if (string.IsNullOrWhiteSpace(novoNome) || string.IsNullOrWhiteSpace(novaFuncao))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("\n[ERRO] Nome e Função não podem ficar em branco.");
+            Console.ResetColor();
+            return;
+        }
+
+        using var conn = new MySqlConnection(Database.GetConnectionString());
+        try
+        {
+            conn.Open();
+            // O WHERE garante que a equipe logada só consiga editar membros que pertencem a ela mesma
+            string sql = @"UPDATE membros SET nome_membro = @nome, funcao = @funcao 
+                            WHERE id_membro = @id AND nome_equipe = @equipe";
+
+            using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@nome", novoNome);
+            cmd.Parameters.AddWithValue("@funcao", novaFuncao);
+            cmd.Parameters.AddWithValue("@id", idMembro);
+            cmd.Parameters.AddWithValue("@equipe", nomeEquipe);
+
+            int linhasAfetadas = cmd.ExecuteNonQuery();
+
+            if (linhasAfetadas > 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("\n[SUCESSO] Dados do membro atualizados com sucesso!");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("\n[ERRO] Membro não encontrado ou não pertence à sua equipe.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n[ERRO] Falha ao atualizar membro: {ex.Message}");
+        }
+        Console.ResetColor();
+    }
+
+    public static void ExcluirMembro(string nomeEquipe)
+    {
+        Console.Clear();
+        Console.WriteLine($"--- REMOVER MEMBRO - EQUIPE {nomeEquipe.ToUpper()} ---");
+        
+        ListarMembros(nomeEquipe);
+
+        Console.Write("\nDigite o ID do membro que deseja REMOVER (ou 0 para cancelar): ");
+        if (!int.TryParse(Console.ReadLine(), out int idMembro) || idMembro == 0) return;
+
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.Write($"\nTem certeza que deseja remover o membro ID {idMembro}? (S/N): ");
+        Console.ResetColor();
+        string confirmacao = Console.ReadLine()!.ToUpper();
+
+        if (confirmacao != "S")
+        {
+            Console.WriteLine("\nOperação cancelada.");
+            return;
+        }
+
+        using var conn = new MySqlConnection(Database.GetConnectionString());
+        try
+        {
+            conn.Open();
+            // Segurança extra: a equipe só deleta se o membro for dela
+            string sql = "DELETE FROM membros WHERE id_membro = @id AND nome_equipe = @equipe";
+
+            using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@id", idMembro);
+            cmd.Parameters.AddWithValue("@equipe", nomeEquipe);
+
+            int linhasAfetadas = cmd.ExecuteNonQuery();
+
+            if (linhasAfetadas > 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("\n[SUCESSO] Membro removido do sistema.");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("\n[ERRO] Membro não encontrado ou não pertence à sua equipe.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n[ERRO] Falha ao remover membro: {ex.Message}");
+        }
+        Console.ResetColor();
+    }
 
 
 

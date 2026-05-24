@@ -1,17 +1,10 @@
 using MySql.Data.MySqlClient;
 using Microsoft.Extensions.Configuration;
+using System;
+using System.IO;
 
 public class GerenteManager
 {
-    private static string GetConnectionString()
-    {
-        var config = new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json")
-            .Build();
-        return config.GetConnectionString("DefaultConnection")!;
-    }
-
     public static void CadastrarEquipe()
     {
         Console.WriteLine("\n--- CADASTRO DE NOVA EQUIPE ---");
@@ -31,7 +24,8 @@ public class GerenteManager
         Console.Write("Capital Alocado Inicial (Ex: 500000): ");
         if (!decimal.TryParse(Console.ReadLine(), out decimal capital)) capital = 0;
 
-        using var conn = new MySqlConnection(GetConnectionString());
+        // Chamando a String de Conexão centralizada em Database.cs
+        using var conn = new MySqlConnection(Database.GetConnectionString());
         try
         {
             conn.Open();
@@ -48,6 +42,10 @@ public class GerenteManager
             cmd.ExecuteNonQuery();
             Console.WriteLine("\n[SUCESSO] Equipe cadastrada com sucesso!");
         }
+        catch (MySqlException ex) when (ex.Number == 1062) // Erro de entrada duplicada (UNIQUE)
+        {
+            Console.WriteLine("\n[ERRO] Já existe uma equipe cadastrada com este nome.");
+        }
         catch (Exception ex)
         {
             Console.WriteLine($"\n[ERRO] Não foi possível cadastrar: {ex.Message}");
@@ -56,15 +54,16 @@ public class GerenteManager
 
     public static (decimal total, int quantidade, decimal media) ObterMetricasGlobais()
     {
-        using var conn = new MySqlConnection(GetConnectionString());
+        using var conn = new MySqlConnection(Database.GetConnectionString());
         try
         {
             conn.Open();
+            // Query ajustada para calcular a média real com base nas porcentagens salvas de cada operação
             string sql = @"
                 SELECT 
-                    (SELECT SUM(capital_alocado) FROM equipes), 
+                    (SELECT IFNULL(SUM(capital_alocado), 0) FROM equipes), 
                     (SELECT COUNT(*) FROM equipes),
-                    (SELECT IFNULL(SUM(lucro_prejuizo), 0) / IFNULL(SUM(valor_aplicado), 1) * 100 FROM operacoes)";
+                    (SELECT IFNULL(AVG(retorno_porcentagem), 0) FROM operacoes)";
             
             using var cmd = new MySqlCommand(sql, conn);
             using var reader = cmd.ExecuteReader();
@@ -75,7 +74,7 @@ public class GerenteManager
                 int quantidade = reader.GetInt32(1);
                 decimal media = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
                 
-                return (total, quantidade, media);
+                return (total, quantity: quantidade, media);
             }
         }
         catch (Exception ex)
@@ -85,10 +84,9 @@ public class GerenteManager
         return (0, 0, 0);
     }
 
-
     public static void ListarEquipesBanco()
     {
-        using var conn = new MySqlConnection(GetConnectionString());
+        using var conn = new MySqlConnection(Database.GetConnectionString());
         try
         {
             conn.Open();
@@ -97,7 +95,7 @@ public class GerenteManager
             using var cmd = new MySqlCommand(sql, conn);
             using var reader = cmd.ExecuteReader();
 
-            Console.WriteLine("\n=== EQUIPES EM OPERAÇÃO (VIA DATABASE) ===");
+            Console.WriteLine("\n=== EQUIPES EM OPERAÇÃO ===");
             Console.WriteLine("---------------------------------------------------");
 
             if (!reader.HasRows)
@@ -122,12 +120,11 @@ public class GerenteManager
 
     public static void ExibirRelatorioGeral()
     {
-        using var conn = new MySqlConnection(GetConnectionString());
+        using var conn = new MySqlConnection(Database.GetConnectionString());
         try
         {
             conn.Open();
             
-            // SQL robusto: Soma lucros, calcula ROI e traz dados da equipe
             string sql = @"
                 SELECT 
                     e.nome_equipe, 
@@ -138,7 +135,7 @@ public class GerenteManager
                 FROM equipes e
                 LEFT JOIN operacoes o ON e.id = o.equipe_id
                 GROUP BY e.id, e.nome_equipe, e.responsavel, e.capital_alocado, e.capital_utilizado
-                ORDER BY pnl_total DESC"; // Ranking: Quem lucra mais aparece primeiro
+                ORDER BY pnl_total DESC";
 
             using var cmd = new MySqlCommand(sql, conn);
             using var reader = cmd.ExecuteReader();
@@ -159,7 +156,6 @@ public class GerenteManager
                 decimal pnl = reader.GetDecimal(4);
                 lucroGlobal += pnl;
 
-                // Lógica de cores para o P&L individual
                 if (pnl > 0) Console.ForegroundColor = ConsoleColor.Green;
                 else if (pnl < 0) Console.ForegroundColor = ConsoleColor.Red;
 
@@ -185,7 +181,102 @@ public class GerenteManager
         }
     }
 
+    public static void EditarEquipe()
+    {
+        Console.WriteLine("\n--- EDITAR EQUIPE (PAINEL ADMIN) ---");
+        Console.Write("Digite o nome da equipe que deseja editar: ");
+        string nomeBusca = Console.ReadLine()!;
 
+        using var conn = new MySqlConnection(Database.GetConnectionString());
+        try
+        {
+            conn.Open();
+            
+            string sqlCheck = "SELECT id FROM equipes WHERE nome_equipe = @nome";
+            int equipeId = 0;
+            using (var cmdCheck = new MySqlCommand(sqlCheck, conn))
+            {
+                cmdCheck.Parameters.AddWithValue("@nome", nomeBusca);
+                using var reader = cmdCheck.ExecuteReader();
+                if (!reader.Read())
+                {
+                    Console.WriteLine("\n[ERRO] Equipe não encontrada.");
+                    return;
+                }
+                equipeId = reader.GetInt32("id");
+            }
 
+            Console.WriteLine("\n[Deixe em branco para manter o valor atual]");
+            
+            Console.Write("Novo Nome da Equipe: ");
+            string novoNome = Console.ReadLine()!;
+            
+            Console.Write("Novo Responsável: ");
+            string novoResp = Console.ReadLine()!;
 
+            Console.Write("Novo Capital Alocado (R$): ");
+            string capInput = Console.ReadLine()!;
+            decimal? novoCapital = null;
+            if (!string.IsNullOrWhiteSpace(capInput) && decimal.TryParse(capInput, out decimal cap)) novoCapital = cap;
+
+            string sqlUpdate = @"UPDATE equipes SET 
+                                nome_equipe = IF(@nome = '', nome_equipe, @nome),
+                                responsavel = IF(@resp = '', responsavel, @resp),
+                                capital_alocado = IF(@cap IS NULL, capital_alocado, @cap)
+                                WHERE id = @id";
+
+            using var cmdUp = new MySqlCommand(sqlUpdate, conn);
+            cmdUp.Parameters.AddWithValue("@nome", novoNome);
+            cmdUp.Parameters.AddWithValue("@resp", novoResp);
+            cmdUp.Parameters.AddWithValue("@cap", (object?)novoCapital ?? DBNull.Value);
+            cmdUp.Parameters.AddWithValue("@id", equipeId);
+
+            cmdUp.ExecuteNonQuery();
+            Console.WriteLine("\n[SUCESSO] Dados da equipe atualizados!");
+        }
+        catch (MySqlException ex) when (ex.Number == 1062)
+        {
+            Console.WriteLine("\n[ERRO] Não foi possível renomear: Já existe outra equipe com este nome.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n[ERRO] Falha ao editar equipe: {ex.Message}");
+        }
+    }
+
+    public static void ExcluirEquipe()
+    {
+        Console.WriteLine("\n--- EXCLUIR EQUIPE (PAINEL ADMIN) ---");
+        Console.Write("Digite o nome da equipe que deseja REMOVER permanentemente: ");
+        string nome = Console.ReadLine()!;
+
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Write($"AVISO: Isso apagará TODOS os membros e operações da equipe '{nome}'. Confirma? (S/N): ");
+        Console.ResetColor();
+        if (Console.ReadLine()!.ToUpper() != "S")
+        {
+            Console.WriteLine("\nOperação cancelada.");
+            return;
+        }
+
+        using var conn = new MySqlConnection(Database.GetConnectionString());
+        try
+        {
+            conn.Open();
+            string sql = "DELETE FROM equipes WHERE nome_equipe = @nome";
+            using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@nome", nome);
+
+            int linhasAfetadas = cmd.ExecuteNonQuery();
+
+            if (linhasAfetadas > 0)
+                Console.WriteLine("\n[SUCESSO] Equipe e todos os seus vínculos foram removidos do sistema.");
+            else
+                Console.WriteLine("\n[AVISO] Nenhuma equipe encontrada com este nome.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n[ERRO] Falha ao excluir equipe: {ex.Message}");
+        }
+    }
 }
