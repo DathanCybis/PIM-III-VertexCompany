@@ -23,7 +23,6 @@ public class EquipeManager
         // Cálculo automático da porcentagem de retorno
         decimal porcentagem = valor > 0 ? (lucro / valor) * 100 : 0;
 
-        // Alterado para a classe Database centralizada
         using var conn = new MySqlConnection(Database.GetConnectionString());
         try
         {
@@ -59,7 +58,7 @@ public class EquipeManager
             cmdUp.Parameters.AddWithValue("@id", equipeId);
             cmdUp.ExecuteNonQuery();
 
-            Console.WriteLine("\n[SUCESSO] Operação registrada e capital atualizado!");
+            Console.WriteLine("\n[SUCESSO] Operação registrada e capital updated!");
         }
         catch (Exception ex)
         {
@@ -74,7 +73,6 @@ public class EquipeManager
         {
             conn.Open();
             
-            // Consulta protegendo campos nulos com IFNULL
             string sql = @"
                 SELECT e.capital_alocado, IFNULL(e.capital_utilizado, 0), 
                     IFNULL(SUM(o.lucro_prejuizo), 0) as pnl_total,
@@ -167,7 +165,7 @@ public class EquipeManager
         {
             conn.Open();
             string sql = @"
-                SELECT m.nome, m.status 
+                SELECT m.id, m.nome, m.status 
                 FROM membros m
                 JOIN equipes e ON m.equipe_id = e.id
                 WHERE e.nome_equipe = @nome";
@@ -178,6 +176,8 @@ public class EquipeManager
 
             Console.WriteLine($"\n=== MEMBROS DA EQUIPE: {nomeEquipe.ToUpper()} ===");
             Console.WriteLine("---------------------------------------------------");
+            Console.WriteLine("ID   | Nome                 | Status");
+            Console.WriteLine("---------------------------------------------------");
 
             if (!reader.HasRows)
             {
@@ -186,12 +186,13 @@ public class EquipeManager
 
             while (reader.Read())
             {
-                string nome = reader.GetString(0);
-                string status = reader.GetString(1);
+                int id = reader.GetInt32(0);       
+                string nome = reader.GetString(1);     
+                string status = reader.GetString(2);   
                 
                 if (status == "Férias") Console.ForegroundColor = ConsoleColor.Yellow;
                 
-                Console.WriteLine($"- {nome.PadRight(20)} | Status: {status}");
+                Console.WriteLine($"{id,-4} | {nome.PadRight(20)} | Status: {status}");
                 Console.ResetColor();
             }
             Console.WriteLine("---------------------------------------------------");
@@ -208,7 +209,6 @@ public class EquipeManager
         try
         {
             conn.Open();
-            // CORRIGIDO: Modificado de 'o.valor_applied' para 'o.valor_aplicado' para evitar crash
             string sql = @"SELECT o.id, o.ativo, o.tipo, o.valor_aplicado, o.lucro_prejuizo, o.retorno_porcentagem 
                         FROM operacoes o 
                         JOIN equipes e ON o.equipe_id = e.id 
@@ -368,13 +368,11 @@ public class EquipeManager
         }
     }
 
-
     public static void EditarMembro(string nomeEquipe)
     {
         Console.Clear();
         Console.WriteLine($"--- EDITAR MEMBRO - EQUIPE {nomeEquipe.ToUpper()} ---");
         
-        // Primeiro, lista os membros para o usuário ver os IDs disponíveis
         ListarMembros(nomeEquipe);
 
         Console.Write("\nDigite o ID do membro que deseja editar (ou 0 para cancelar): ");
@@ -382,13 +380,15 @@ public class EquipeManager
 
         Console.Write("Digite o novo Nome do membro: ");
         string novoNome = Console.ReadLine()!;
-        Console.Write("Digite a nova Função/Cargo (ex: Trader, Analista): ");
-        string novaFuncao = Console.ReadLine()!;
+        
+        Console.WriteLine("Novo Status: [1] Ativo | [2] De Férias");
+        string statusOp = Console.ReadLine()!;
+        string novoStatus = (statusOp == "2") ? "Férias" : "Ativo";
 
-        if (string.IsNullOrWhiteSpace(novoNome) || string.IsNullOrWhiteSpace(novaFuncao))
+        if (string.IsNullOrWhiteSpace(novoNome))
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("\n[ERRO] Nome e Função não podem ficar em branco.");
+            Console.WriteLine("\n[ERRO] O nome do membro não pode ficar em branco.");
             Console.ResetColor();
             return;
         }
@@ -397,15 +397,25 @@ public class EquipeManager
         try
         {
             conn.Open();
-            // O WHERE garante que a equipe logada só consiga editar membros que pertencem a ela mesma
-            string sql = @"UPDATE membros SET nome_membro = @nome, funcao = @funcao 
-                            WHERE id_membro = @id AND nome_equipe = @equipe";
+
+            // 1. Buscamos o ID numérico da equipe pelo nome recebido no parâmetro do método
+            string sqlId = "SELECT id FROM equipes WHERE nome_equipe = @nomeEquipe";
+            int equipeId = 0;
+            using (var cmdId = new MySqlCommand(sqlId, conn))
+            {
+                cmdId.Parameters.AddWithValue("@nomeEquipe", nomeEquipe);
+                equipeId = Convert.ToInt32(cmdId.ExecuteScalar());
+            }
+
+            // 2. Query corrigida usando os parâmetros mapeados corretamente
+            string sql = @"UPDATE membros SET nome = @nome, status = @status 
+                           WHERE id = @id AND equipe_id = @equipeId";
 
             using var cmd = new MySqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@nome", novoNome);
-            cmd.Parameters.AddWithValue("@funcao", novaFuncao);
+            cmd.Parameters.AddWithValue("@status", novoStatus);
             cmd.Parameters.AddWithValue("@id", idMembro);
-            cmd.Parameters.AddWithValue("@equipe", nomeEquipe);
+            cmd.Parameters.AddWithValue("@equipeId", equipeId); // Vinculado corretamente ao ID numérico
 
             int linhasAfetadas = cmd.ExecuteNonQuery();
 
@@ -452,12 +462,22 @@ public class EquipeManager
         try
         {
             conn.Open();
-            // Segurança extra: a equipe só deleta se o membro for dela
-            string sql = "DELETE FROM membros WHERE id_membro = @id AND nome_equipe = @equipe";
+
+            // 1. Buscamos o ID numérico da equipe primeiro
+            string sqlId = "SELECT id FROM equipes WHERE nome_equipe = @nomeEquipe";
+            int equipeId = 0;
+            using (var cmdId = new MySqlCommand(sqlId, conn))
+            {
+                cmdId.Parameters.AddWithValue("@nomeEquipe", nomeEquipe);
+                equipeId = Convert.ToInt32(cmdId.ExecuteScalar());
+            }
+
+            // 2. Query executada filtrando por ID numérico da equipe
+            string sql = "DELETE FROM membros WHERE id = @id AND equipe_id = @equipeId";
 
             using var cmd = new MySqlCommand(sql, conn);
             cmd.Parameters.AddWithValue("@id", idMembro);
-            cmd.Parameters.AddWithValue("@equipe", nomeEquipe);
+            cmd.Parameters.AddWithValue("@equipeId", equipeId); // Parâmetro agora bate com a query SQL
 
             int linhasAfetadas = cmd.ExecuteNonQuery();
 
@@ -478,7 +498,4 @@ public class EquipeManager
         }
         Console.ResetColor();
     }
-
-
-
 }
