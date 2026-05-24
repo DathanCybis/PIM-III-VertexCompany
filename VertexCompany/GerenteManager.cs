@@ -74,7 +74,7 @@ public class GerenteManager
                 int quantidade = reader.GetInt32(1);
                 decimal media = reader.IsDBNull(2) ? 0 : reader.GetDecimal(2);
                 
-                return (total, quantity: quantidade, media);
+                return (total, quantidade, media);
             }
         }
         catch (Exception ex)
